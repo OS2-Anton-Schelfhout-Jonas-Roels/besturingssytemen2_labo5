@@ -21,6 +21,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <wait.h>
+#include <math.h>
 
 static int print_usage() {
     printf("Usage: <command> <port number> \n");
@@ -33,8 +34,9 @@ static void* datamgr_run(void* buffer) {
     // datamgr loop
     while (true) {
         sbuffer_lock(buffer);
-        if (!sbuffer_is_empty(buffer)) {
+        // if (!sbuffer_is_empty(buffer)) {
             sensor_data_t data = sbuffer_remove_last(buffer);
+        if(data.value !=  -INFINITY) {
             datamgr_process_reading(&data);
             // everything nice & processed
         } else if (sbuffer_is_closed(buffer)) {
@@ -58,8 +60,9 @@ static void* storagemgr_run(void* buffer) {
     // storagemgr loop
     while (true) {
         sbuffer_lock(buffer);
-        if (!sbuffer_is_empty(buffer)) {
+        // if (!sbuffer_is_empty(buffer)) {
             sensor_data_t data = sbuffer_remove_last(buffer);
+        if(data.value !=  -INFINITY) {
             storagemgr_insert_sensor(db, data.id, data.value, data.ts);
             // everything nice & processed
         } else if (sbuffer_is_closed(buffer)) {
