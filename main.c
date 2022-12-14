@@ -70,6 +70,12 @@ static void* storagemgr_run(void* buffer) {
             sbuffer_unlock(buffer);
             break;
         }
+        // the buffer is empty but not closed, we wait
+        // else {
+        //     ASSERT_ELSE_PERROR(pthread_mutex_lock(&buffer->storageManagerMutex) == 0);
+
+
+        // }
         // give the others a chance to lock the mutex
         sbuffer_unlock(buffer);
     }
@@ -95,6 +101,8 @@ int main(int argc, char* argv[]) {
     pthread_t storagemgr_thread;
     ASSERT_ELSE_PERROR(pthread_create(&storagemgr_thread, NULL, storagemgr_run, buffer) == 0);
 
+    setManagers(buffer, datamgr_thread, storagemgr_thread);
+    
     // main server loop
     connmgr_listen(port_number, buffer);
 

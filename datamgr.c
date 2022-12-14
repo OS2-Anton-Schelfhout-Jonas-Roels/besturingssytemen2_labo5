@@ -75,10 +75,10 @@ void datamgr_process_reading(const sensor_data_t* data) {
 
     sensor_value_t running_average = sensor_running_average(obtained_sensor);
     if (obtained_sensor->count >= RUN_AVG_LENGTH) {
-        if (running_average < SET_MIN_TEMP) {
+        if (data->value < SET_MIN_TEMP) {
             printf("Sensor %" PRIu16 " read a temperature value (%f) lower than " TO_STRING(SET_MIN_TEMP) "\n", data->id, data->value);
         }
-        if (running_average > SET_MAX_TEMP) {
+        if (data->value > SET_MAX_TEMP) {
             printf("Sensor %" PRIu16 " read a temperature value (%f) higher than " TO_STRING(SET_MAX_TEMP) "\n", data->id, data->value);
         }
     }

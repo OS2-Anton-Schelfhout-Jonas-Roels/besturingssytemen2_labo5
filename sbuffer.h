@@ -9,7 +9,7 @@
 #endif
 
 #include "config.h"
-
+#include <pthread.h>
 #define SBUFFER_FAILURE -1
 #define SBUFFER_SUCCESS 0
 
@@ -57,3 +57,5 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer);
  * Closes the buffer. This signifies that no more data will be inserted.
  */
 void sbuffer_close(sbuffer_t* buffer);
+
+void setManagers(sbuffer_t* buffer, unsigned long datamgr, unsigned long storagemgr);
