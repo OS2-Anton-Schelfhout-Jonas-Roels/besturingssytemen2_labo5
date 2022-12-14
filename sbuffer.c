@@ -20,6 +20,7 @@
 typedef struct sbuffer_node {
     struct sbuffer_node* prev;
     sensor_data_t data;
+    pthread_t readBy;
 } sbuffer_node_t;
 
 struct sbuffer {
@@ -117,18 +118,61 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
     assert(buffer->head != NULL);
 
     sbuffer_node_t* removed_node = buffer->tail;
-    assert(removed_node != NULL);
-    if (removed_node == buffer->head) {
-        buffer->head = NULL;
-        assert(removed_node == buffer->tail);
+
+    // if there is no set reader set to this thread and return data
+    if(!removed_node->readBy){
+        removed_node->readBy = pthread_self();
+        ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
+        return removed_node->data;
+    } 
+    // printf("READBY: %lu \n" , removed_node->readBy);
+    // if the node is already read by another node delete the node and return data
+    if(removed_node->readBy != pthread_self()) {
+        assert(removed_node != NULL);
+        if (removed_node == buffer->head) {
+            buffer->head = NULL;
+            assert(removed_node == buffer->tail);
+        }
+        buffer->tail = removed_node->prev;
+        ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
+
+        sensor_data_t ret = removed_node->data;
+        free(removed_node);
+        return ret;
     }
-    buffer->tail = removed_node->prev;
+    sbuffer_node_t* previous_node = removed_node;
+    removed_node = removed_node->prev;
+    while(removed_node != NULL && removed_node->readBy == pthread_self()) {
+        previous_node = removed_node;
+        removed_node = removed_node->prev;
+    }
+
+    if(removed_node == NULL) {
+        ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
+        sensor_data_t data;
+        data.value =  -INFINITY;
+        return data;
+    }
+
+    if(!removed_node->readBy){
+        removed_node->readBy = pthread_self();
+        ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
+        return removed_node->data;
+    } 
+
+    if (removed_node == buffer->head) {
+        buffer->head = previous_node;
+        // assert(removed_node == buffer->tail);
+    }
+    previous_node->prev = removed_node->prev;
     ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
 
     sensor_data_t ret = removed_node->data;
     free(removed_node);
-
     return ret;
+
+
+
 }
 
 void sbuffer_close(sbuffer_t* buffer) {
