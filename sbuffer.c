@@ -197,11 +197,12 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
 
     // if there is no set reader set to this thread and return data
     ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);    //neem writelock om readby te zetten, moet voor if om dataraces te vermijden
-    if(!removed_node->readBy){  //heap-use-after-free error bij fsanitize omdat node al verwijderd is door andere thread terwijl deze wacht op de lock
+    if(!removed_node->readBy) {  //heap-use-after-free error bij fsanitize omdat node al verwijderd is door andere thread terwijl deze wacht op de lock
+        sensor_data_t data = removed_node->data; // om data races te voorkomen moeten we eerst de data kopieren naar een lokale variabele aangezien na het releasen van de lock (voor return) de data mogelijks al gefreed is door een andere thread
         removed_node->readBy = pthread_self();
         //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
         ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    //unlocken voor return!
-        return removed_node->data;
+        return data;
     }
     /*  -> lock loslaten om meteen weer te nemen -> niet nodig (fixed bepaalde dataraces zoals in afbeelding dataRaceDatamgrStoragemgr.png)
     ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    //voor moest if niet zijn uitgevoerd
@@ -254,10 +255,11 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
 
     ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);    //neem writelock om readby en previous_node te zetten, moet voor if om dataraces te vermijden
     if(!removed_node->readBy){
+        sensor_data_t data = removed_node->data;
         removed_node->readBy = pthread_self();
         //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
         ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    //unlocken voor return!
-        return removed_node->data;
+        return data;
     } 
 
     if (removed_node == buffer->head) {
