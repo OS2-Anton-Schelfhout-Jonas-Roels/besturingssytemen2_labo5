@@ -188,15 +188,21 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
         }
         // printf("Thread %ul: wakes \n", pthread_self());  
     }
-    
-    assert(buffer->head != NULL);
+    ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
+    ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);
+    // assert(buffer->head != NULL);
 
     sbuffer_node_t* removed_node = buffer->tail;
+    if(removed_node == NULL) {
+        ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
+        // sleep_readers(buffer);
+        return sbuffer_remove_last(buffer);
+    }
 
-    ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
+    // ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
 
     // if there is no set reader set to this thread and return data
-    ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);    //neem writelock om readby te zetten, moet voor if om dataraces te vermijden
+    // ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);    //neem writelock om readby te zetten, moet voor if om dataraces te vermijden
     if(!removed_node->readBy) {  //heap-use-after-free error bij fsanitize omdat node al verwijderd is door andere thread terwijl deze wacht op de lock
         sensor_data_t data = removed_node->data; // om data races te voorkomen moeten we eerst de data kopieren naar een lokale variabele aangezien na het releasen van de lock (voor return) de data mogelijks al gefreed is door een andere thread
         removed_node->readBy = pthread_self();
@@ -220,10 +226,10 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
         }
         buffer->tail = removed_node->prev;
         //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
-        ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
 
         sensor_data_t ret = removed_node->data;
         free(removed_node);     //probleem: ene thread vb storageManager voert dit uit terwijl dataManager nog leest op lijn 204 (return removed_node->data) en/of lijn 252 (return sbuffer_remove_last(buffer)) (ook zo bij free op lijn 250) -> datarace
+        ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
         return ret;
     }
     //ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);  //verplaatst naar onder while loop in de hoop dataraces te fixen, maar werkt niet echt
@@ -234,10 +240,10 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
         removed_node = removed_node->prev;
     }
 
-    ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
+    // ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
     
     if(removed_node == NULL) {
-        ASSERT_ELSE_PERROR(pthread_rwlock_rdlock(&buffer->rwlock) == 0);    //neem readlock om te zien als buffer leeg is
+        // ASSERT_ELSE_PERROR(pthread_rwlock_rdlock(&buffer->rwlock) == 0);    //neem readlock om te zien als buffer leeg is
         if(buffer->closed) {
             ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    //laat read lock los voor return
             //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
@@ -253,7 +259,7 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
         return sbuffer_remove_last(buffer);
     }
 
-    ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);    //neem writelock om readby en previous_node te zetten, moet voor if om dataraces te vermijden
+    // ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);    //neem writelock om readby en previous_node te zetten, moet voor if om dataraces te vermijden
     if(!removed_node->readBy){
         sensor_data_t data = removed_node->data;
         removed_node->readBy = pthread_self();
@@ -268,10 +274,11 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
     }
     previous_node->prev = removed_node->prev;
     //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
-    ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
+    // ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
 
     sensor_data_t ret = removed_node->data;
-    free(removed_node);     
+    free(removed_node); 
+    ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    
     return ret;
 
 }
