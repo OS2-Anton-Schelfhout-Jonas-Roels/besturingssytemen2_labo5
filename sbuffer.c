@@ -15,12 +15,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include "lib/hashset.h"
 
 
 typedef struct sbuffer_node {
     struct sbuffer_node* prev;
     sensor_data_t data;
-    pthread_t readBy;
+    //pthread_t readBy;
+    hashset_t readBy;
 } sbuffer_node_t;
 
 struct sbuffer {
@@ -35,6 +37,7 @@ struct sbuffer {
     pthread_mutex_t storageManagerMutex;
     unsigned long dataManager;
     unsigned long storageManager;
+    int NUMTHREADS;
 };
 
 static sbuffer_node_t* create_node(const sensor_data_t* data) {
@@ -42,6 +45,7 @@ static sbuffer_node_t* create_node(const sensor_data_t* data) {
     *node = (sbuffer_node_t){
         .data = *data,
         .prev = NULL,
+        .readBy = hashset_create(),
     };
     return node;
 }
@@ -65,6 +69,9 @@ sbuffer_t* sbuffer_create() {
     pthread_cond_init(&buffer->storageManagerCondition, NULL);
     pthread_mutex_init(&buffer->dataManagerMutex, NULL);
     pthread_mutex_init(&buffer->storageManagerMutex, NULL);
+
+    buffer->NUMTHREADS = 2; //voorlopig maar 2 reader threads, maar kan met deze constante uitgebreid worden
+
     return buffer;
 }
 
@@ -203,9 +210,10 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
 
     // if there is no set reader set to this thread and return data
     // ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);    //neem writelock om readby te zetten, moet voor if om dataraces te vermijden
-    if(!removed_node->readBy) {  //heap-use-after-free error bij fsanitize omdat node al verwijderd is door andere thread terwijl deze wacht op de lock
+    if(!hashset_is_member(removed_node->readBy, pthread_self()) && hashset_num_items(removed_node->readBy) < buffer->NUMTHREADS) {  //heap-use-after-free error bij fsanitize omdat node al verwijderd is door andere thread terwijl deze wacht op de lock
         sensor_data_t data = removed_node->data; // om data races te voorkomen moeten we eerst de data kopieren naar een lokale variabele aangezien na het releasen van de lock (voor return) de data mogelijks al gefreed is door een andere thread
-        removed_node->readBy = pthread_self();
+        //removed_node->readBy = pthread_self();
+        hashset_add(removed_node->readBy, pthread_self());
         //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
         ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    //unlocken voor return!
         return data;
@@ -217,7 +225,7 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
 
     ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);    //buiten if geplaatst om dataraces te 
     */
-    if(removed_node->readBy != pthread_self()) {
+    if(hashset_num_items(removed_node->readBy) == buffer->NUMTHREADS) {
         assert(removed_node != NULL);
         
         if (removed_node == buffer->head) {
@@ -235,7 +243,7 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
     //ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);  //verplaatst naar onder while loop in de hoop dataraces te fixen, maar werkt niet echt
     sbuffer_node_t* previous_node = removed_node;
     removed_node = removed_node->prev;
-    while(removed_node != NULL && removed_node->readBy == pthread_self()) {
+    while(removed_node != NULL && hashset_is_member(removed_node->readBy, pthread_self())) {
         previous_node = removed_node;
         removed_node = removed_node->prev;
     }
@@ -260,9 +268,9 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
     }
 
     // ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);    //neem writelock om readby en previous_node te zetten, moet voor if om dataraces te vermijden
-    if(!removed_node->readBy){
+    if(!hashset_is_member(removed_node->readBy, pthread_self()) && hashset_num_items(removed_node->readBy) < buffer->NUMTHREADS){
         sensor_data_t data = removed_node->data;
-        removed_node->readBy = pthread_self();
+         hashset_add(removed_node->readBy, pthread_self());
         //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
         ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    //unlocken voor return!
         return data;
