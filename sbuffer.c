@@ -54,10 +54,9 @@ sbuffer_t* sbuffer_create() {
     buffer->head = NULL;
     buffer->tail = NULL;
     buffer->closed = false;
-    //ASSERT_ELSE_PERROR(pthread_mutex_init(&buffer->mutex, NULL) == 0);
+
     ASSERT_ELSE_PERROR(pthread_rwlock_init(&buffer->rwlock, NULL) == 0);        //creatie readwrite lock
-    //buffer->rwlock = PTHREAD_RWLOCK_INITIALIZER;
-    //printf("Creation of ReadWritelock");
+
     buffer->dataManager = 0;
     buffer->storageManager = 0;
 
@@ -65,18 +64,17 @@ sbuffer_t* sbuffer_create() {
     pthread_cond_init(&buffer->storageManagerCondition, NULL);
     pthread_mutex_init(&buffer->dataManagerMutex, NULL);
     pthread_mutex_init(&buffer->storageManagerMutex, NULL);
+
     return buffer;
 }
 
 void sleep_readers(sbuffer_t* buffer) {
     if(pthread_self() == buffer->dataManager) {
-        // printf("Datamanager %ul: sleeping (Current tid: %ul) \n", buffer->dataManager, pthread_self());
         ASSERT_ELSE_PERROR(pthread_mutex_lock(&buffer->dataManagerMutex) == 0);
         ASSERT_ELSE_PERROR(pthread_cond_wait(&(buffer->dataManagerCondition), &(buffer->dataManagerMutex)) == 0);   
         ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->dataManagerMutex) == 0);
     }  
     else if(pthread_self() == buffer->storageManager) {
-        // printf("Storagemanager %ul: sleeping (Current tid: %ul) \n", buffer->dataManager, pthread_self());
         ASSERT_ELSE_PERROR(pthread_mutex_lock(&buffer->storageManagerMutex) == 0);
         ASSERT_ELSE_PERROR(pthread_cond_wait(&(buffer->storageManagerCondition), &(buffer->storageManagerMutex)) == 0);   
         ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->storageManagerMutex) == 0);
@@ -87,8 +85,6 @@ void sbuffer_destroy(sbuffer_t* buffer) {
     assert(buffer);
     // make sure it's empty
     assert(buffer->head == buffer->tail);
-    //ASSERT_ELSE_PERROR(pthread_mutex_destroy(&buffer->mutex) == 0);
-    printf("Destrucion of rwlock");
     ASSERT_ELSE_PERROR(pthread_rwlock_destroy(&buffer->rwlock) == 0);
 
     pthread_cond_destroy(&buffer->dataManagerCondition);
@@ -109,20 +105,16 @@ void sbuffer_unlock(sbuffer_t* buffer) {
 
 bool sbuffer_is_empty(sbuffer_t* buffer) {
     assert(buffer);
-    //ASSERT_ELSE_PERROR(pthread_mutex_lock(&buffer->mutex) == 0);
     ASSERT_ELSE_PERROR(pthread_rwlock_rdlock(&buffer->rwlock) == 0); //wordt enkel uitgevoerd door readers, writer checkt nooit al buffer leeg is
     bool res = buffer->head == NULL;
-    //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
     ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
     return res;
 }
 
 bool sbuffer_is_closed(sbuffer_t* buffer) {
     assert(buffer);
-    //ASSERT_ELSE_PERROR(pthread_mutex_lock(&buffer->mutex) == 0);
     ASSERT_ELSE_PERROR(pthread_rwlock_rdlock(&buffer->rwlock) == 0);    //checkt als er geen writers bezig zijn of staan te wachten, indien neen, gaat crit sec binnen
     bool res = buffer->closed;
-    //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
     ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    //unlock rwlock
     return res;
 }
@@ -136,7 +128,6 @@ int sbuffer_insert_first(sbuffer_t* buffer, sensor_data_t const* data) {    //wr
     sbuffer_node_t* node = create_node(data);
     assert(node->prev == NULL);
 
-    //ASSERT_ELSE_PERROR(pthread_mutex_lock(&buffer->mutex) == 0);
     ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);    //accure writer lock
     bool wasEmpty = buffer->head == NULL;
     // insert it
@@ -147,7 +138,6 @@ int sbuffer_insert_first(sbuffer_t* buffer, sensor_data_t const* data) {    //wr
     if (buffer->tail == NULL) {
         buffer->tail = node;
     }        
-    //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
     ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
 
     if(wasEmpty) {      //als buffer leeg was, wil dit zeggen dat de readers slapen, dus maak ze wakker
@@ -160,19 +150,17 @@ int sbuffer_insert_first(sbuffer_t* buffer, sensor_data_t const* data) {    //wr
 
 sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
     assert(buffer);
-    //ASSERT_ELSE_PERROR(pthread_mutex_lock(&buffer->mutex) == 0);
     ASSERT_ELSE_PERROR(pthread_rwlock_rdlock(&buffer->rwlock) == 0);
     // if there are no elements in the buffer we check if the buffer is closed, if that is the case we return a new sensor data struct with value -infinite
     // else we wait untill there are new elements in the buffer
     if(buffer->head == NULL) {
         if(buffer->closed) {
-            //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
             ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
             sensor_data_t data;
             data.value =  -INFINITY;
             return data;
         }
-        //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
+
         while(buffer->head == NULL && !buffer->closed) {    //als buffer leeg is moeten reader threads slapen tot writer er terug iets insteekt
             if (pthread_self() != buffer->dataManager && pthread_self() != buffer->storageManager) {
                 ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    //laat read lock los voor return
@@ -186,36 +174,26 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
                 ASSERT_ELSE_PERROR(pthread_rwlock_rdlock(&buffer->rwlock) == 0);    //neem read lock terug na sleep
             }
         }
-        // printf("Thread %ul: wakes \n", pthread_self());  
     }
     ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
     ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);
-    // assert(buffer->head != NULL);
 
     sbuffer_node_t* removed_node = buffer->tail;
     if(removed_node == NULL) {
         ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
-        // sleep_readers(buffer);
         return sbuffer_remove_last(buffer);
     }
 
-    // ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
 
     // if there is no set reader set to this thread and return data
-    // ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);    //neem writelock om readby te zetten, moet voor if om dataraces te vermijden
     if(!removed_node->readBy) {  //heap-use-after-free error bij fsanitize omdat node al verwijderd is door andere thread terwijl deze wacht op de lock
         sensor_data_t data = removed_node->data; // om data races te voorkomen moeten we eerst de data kopieren naar een lokale variabele aangezien na het releasen van de lock (voor return) de data mogelijks al gefreed is door een andere thread
         removed_node->readBy = pthread_self();
-        //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
         ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    //unlocken voor return!
         return data;
     }
     /*  -> lock loslaten om meteen weer te nemen -> niet nodig (fixed bepaalde dataraces zoals in afbeelding dataRaceDatamgrStoragemgr.png)
-    ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    //voor moest if niet zijn uitgevoerd
-    // printf("READBY: %lu \n" , removed_node->readBy);
     // if the node is already read by another node delete the node and return data
-
-    ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);    //buiten if geplaatst om dataraces te 
     */
     if(removed_node->readBy != pthread_self()) {
         assert(removed_node != NULL);
@@ -225,7 +203,6 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
             assert(removed_node == buffer->tail);
         }
         buffer->tail = removed_node->prev;
-        //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
 
         sensor_data_t ret = removed_node->data;
         free(removed_node);     //probleem: ene thread vb storageManager voert dit uit terwijl dataManager nog leest op lijn 204 (return removed_node->data) en/of lijn 252 (return sbuffer_remove_last(buffer)) (ook zo bij free op lijn 250) -> datarace
@@ -240,13 +217,10 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
         removed_node = removed_node->prev;
     }
 
-    // ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
     
     if(removed_node == NULL) {
-        // ASSERT_ELSE_PERROR(pthread_rwlock_rdlock(&buffer->rwlock) == 0);    //neem readlock om te zien als buffer leeg is
         if(buffer->closed) {
             ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    //laat read lock los voor return
-            //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
             sensor_data_t data;
             data.value =  -INFINITY;
 
@@ -259,22 +233,17 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
         return sbuffer_remove_last(buffer);
     }
 
-    // ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);    //neem writelock om readby en previous_node te zetten, moet voor if om dataraces te vermijden
     if(!removed_node->readBy){
         sensor_data_t data = removed_node->data;
         removed_node->readBy = pthread_self();
-        //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
         ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    //unlocken voor return!
         return data;
     } 
 
     if (removed_node == buffer->head) {
         buffer->head = previous_node;
-        // assert(removed_node == buffer->tail);
     }
     previous_node->prev = removed_node->prev;
-    //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
-    // ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
 
     sensor_data_t ret = removed_node->data;
     free(removed_node); 
@@ -285,19 +254,19 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
 
 void sbuffer_close(sbuffer_t* buffer) {
     assert(buffer);
-    //ASSERT_ELSE_PERROR(pthread_mutex_lock(&buffer->mutex) == 0);
     ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);    //write in buffer
     buffer->closed = true;  
-    //ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
     ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
+
+     // before destroying the buffer make sure to signal the manager threads as they are sleeping (buffer empty) so they can disconnect
+    pthread_cond_signal(&buffer->dataManagerCondition);
+    pthread_cond_signal(&buffer->storageManagerCondition);
 }
 
 
 void setManagers(sbuffer_t* buffer, unsigned long datamgr, unsigned long storagemgr) {
-    // printf("Datamanger: %ul, StorageManger; %ul \n", datamgr, storagemgr);
     ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);
     buffer->dataManager = datamgr;
     buffer->storageManager = storagemgr;
     ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
-    // printf("Datamanger: %ul, StorageManger; %ul \n", buffer->dataManager, buffer->storageManager);
 }
