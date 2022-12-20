@@ -140,10 +140,12 @@ int sbuffer_insert_first(sbuffer_t* buffer, sensor_data_t const* data) {    //wr
     }        
     ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
 
-    if(wasEmpty) {      //als buffer leeg was, wil dit zeggen dat de readers slapen, dus maak ze wakker
-        pthread_cond_signal(&buffer->dataManagerCondition);
-        pthread_cond_signal(&buffer->storageManagerCondition);
-    }
+
+    // we proberen altijd de lezers wakker te maken, eerst de dataManager en dan de storageManager, 
+    // dit voorkomt ook dat de datamanger blijft slapen als deze de lijst volledig heeft overlopen maar nooit meer leeg is
+    pthread_cond_signal(&buffer->dataManagerCondition);
+    pthread_cond_signal(&buffer->storageManagerCondition);
+
 
     return SBUFFER_SUCCESS;
 }
