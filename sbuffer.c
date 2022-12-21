@@ -190,7 +190,9 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
         sbuffer_node_t* removed_node = buffer->dataManagerTail;
         if(removed_node == NULL) {
             ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
-            // printf("DataManagerEnd\n");
+            // // printf("DataManagerEnd\n");
+            // return sbuffer_remove_last(buffer);
+            sleep_readers(buffer);
             return sbuffer_remove_last(buffer);
         }
 
