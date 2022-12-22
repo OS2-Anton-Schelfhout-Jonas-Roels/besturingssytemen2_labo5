@@ -233,8 +233,9 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
             sensor_data_t ret = removed_node->data;
             // printf("Free in dataManager \n");
             buffer->nodes--;
-            free(removed_node);     //probleem: ene thread vb storageManager voert dit uit terwijl dataManager nog leest op lijn 204 (return removed_node->data) en/of lijn 252 (return sbuffer_remove_last(buffer)) (ook zo bij free op lijn 250) -> datarace
             ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
+            free(removed_node);     //probleem: ene thread vb storageManager voert dit uit terwijl dataManager nog leest op lijn 204 (return removed_node->data) en/of lijn 252 (return sbuffer_remove_last(buffer)) (ook zo bij free op lijn 250) -> datarace
+            
             // printf("DataManagerEnd\n");
             return ret;
         }
@@ -276,8 +277,9 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
         buffer->nodes++;
         // printf("Free in storageManager, buffer bevat nog %d nodes \n", buffer->nodes);
         // printf("Free in storageManager \n");
-        free(removed_node);     //probleem: ene thread vb storageManager voert dit uit terwijl dataManager nog leest op lijn 204 (return removed_node->data) en/of lijn 252 (return sbuffer_remove_last(buffer)) (ook zo bij free op lijn 250) -> datarace
         ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
+        free(removed_node);     //probleem: ene thread vb storageManager voert dit uit terwijl dataManager nog leest op lijn 204 (return removed_node->data) en/of lijn 252 (return sbuffer_remove_last(buffer)) (ook zo bij free op lijn 250) -> datarace
+        
         return ret;
     }
     sbuffer_node_t* previous_node = removed_node;
@@ -316,10 +318,11 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
     previous_node->prev = removed_node->prev;
 
     sensor_data_t ret = removed_node->data;
-    free(removed_node); 
     buffer->nodes++;
+    ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0); 
+    free(removed_node); 
     printf("Free in storageManager, buffer bevat nog %d nodes \n", buffer->nodes);
-    ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    
+     
     return ret;
 
 }
