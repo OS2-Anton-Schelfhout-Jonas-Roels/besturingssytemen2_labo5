@@ -36,6 +36,7 @@ struct sbuffer {
     pthread_mutex_t storageManagerMutex;
     unsigned long dataManager;
     unsigned long storageManager;
+    int nodes;
 };
 
 static sbuffer_node_t* create_node(const sensor_data_t* data) {
@@ -60,6 +61,7 @@ sbuffer_t* sbuffer_create() {
 
     buffer->dataManager = 0;
     buffer->storageManager = 0;
+    buffer->nodes = 0;
 
     pthread_cond_init(&buffer->dataManagerCondition, NULL);
     pthread_cond_init(&buffer->storageManagerCondition, NULL);
@@ -142,6 +144,7 @@ int sbuffer_insert_first(sbuffer_t* buffer, sensor_data_t const* data) {    //wr
 
     if(buffer->dataManagerTail == NULL) buffer->dataManagerTail = node;
 
+    buffer->nodes++;
     ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
 
     // if(wasEmpty) {      //als buffer leeg was, wil dit zeggen dat de readers slapen, dus maak ze wakker
@@ -189,9 +192,18 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
 
         sbuffer_node_t* removed_node = buffer->dataManagerTail;
         if(removed_node == NULL) {
+            if(buffer->closed) {
+                ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
+                sensor_data_t data;
+                data.value =  -INFINITY;
+                return data;
+            }
+
+
             ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
             // // printf("DataManagerEnd\n");
             // return sbuffer_remove_last(buffer);
+
             sleep_readers(buffer);
             return sbuffer_remove_last(buffer);
         }
@@ -219,16 +231,19 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
             buffer->tail = removed_node->prev;
 
             sensor_data_t ret = removed_node->data;
+            // printf("Free in dataManager \n");
+            buffer->nodes--;
             free(removed_node);     //probleem: ene thread vb storageManager voert dit uit terwijl dataManager nog leest op lijn 204 (return removed_node->data) en/of lijn 252 (return sbuffer_remove_last(buffer)) (ook zo bij free op lijn 250) -> datarace
             ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
             // printf("DataManagerEnd\n");
             return ret;
         }
-        // else printf("ERROR\n");
+        printf("ERROR\n");
     }
 
 
     ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
+    // printf("StorageManager \n");
     ASSERT_ELSE_PERROR(pthread_rwlock_wrlock(&buffer->rwlock) == 0);
 
     sbuffer_node_t* removed_node = buffer->tail;
@@ -258,6 +273,9 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
         buffer->tail = removed_node->prev;
 
         sensor_data_t ret = removed_node->data;
+        buffer->nodes++;
+        // printf("Free in storageManager, buffer bevat nog %d nodes \n", buffer->nodes);
+        // printf("Free in storageManager \n");
         free(removed_node);     //probleem: ene thread vb storageManager voert dit uit terwijl dataManager nog leest op lijn 204 (return removed_node->data) en/of lijn 252 (return sbuffer_remove_last(buffer)) (ook zo bij free op lijn 250) -> datarace
         ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
         return ret;
@@ -299,6 +317,8 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
 
     sensor_data_t ret = removed_node->data;
     free(removed_node); 
+    buffer->nodes++;
+    printf("Free in storageManager, buffer bevat nog %d nodes \n", buffer->nodes);
     ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    
     return ret;
 
