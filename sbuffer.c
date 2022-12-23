@@ -97,15 +97,6 @@ void sbuffer_destroy(sbuffer_t* buffer) {
     free(buffer);
 }
 
-void sbuffer_lock(sbuffer_t* buffer) {
-    // assert(buffer);
-    // ASSERT_ELSE_PERROR(pthread_mutex_lock(&buffer->mutex) == 0);
-}
-void sbuffer_unlock(sbuffer_t* buffer) {
-    // assert(buffer);
-    // ASSERT_ELSE_PERROR(pthread_mutex_unlock(&buffer->mutex) == 0);
-}
-
 bool sbuffer_is_empty(sbuffer_t* buffer) {
     assert(buffer);
     ASSERT_ELSE_PERROR(pthread_rwlock_rdlock(&buffer->rwlock) == 0); //wordt enkel uitgevoerd door readers, writer checkt nooit al buffer leeg is
@@ -147,10 +138,8 @@ int sbuffer_insert_first(sbuffer_t* buffer, sensor_data_t const* data) {    //wr
     buffer->nodes++;
     ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
 
-    // if(wasEmpty) {      //als buffer leeg was, wil dit zeggen dat de readers slapen, dus maak ze wakker
-        pthread_cond_signal(&buffer->dataManagerCondition);
-        pthread_cond_signal(&buffer->storageManagerCondition);
-    // }
+    pthread_cond_signal(&buffer->dataManagerCondition);
+    pthread_cond_signal(&buffer->storageManagerCondition);
 
     return SBUFFER_SUCCESS;
 }
@@ -202,7 +191,6 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
 
             ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
             // // printf("DataManagerEnd\n");
-            // return sbuffer_remove_last(buffer);
 
             sleep_readers(buffer);
             return sbuffer_remove_last(buffer);
@@ -218,9 +206,7 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
             // printf("DataManagerEnd\n");
             return data;
         }
-        /*  -> lock loslaten om meteen weer te nemen -> niet nodig (fixed bepaalde dataraces zoals in afbeelding dataRaceDatamgrStoragemgr.png)
         // if the node is already read by another node delete the node and return data
-        */
         if(removed_node->readBy != pthread_self()) {
             assert(removed_node != NULL);
             
@@ -234,7 +220,7 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
             // printf("Free in dataManager \n");
             buffer->nodes--;
             ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
-            free(removed_node);     //probleem: ene thread vb storageManager voert dit uit terwijl dataManager nog leest op lijn 204 (return removed_node->data) en/of lijn 252 (return sbuffer_remove_last(buffer)) (ook zo bij free op lijn 250) -> datarace
+            free(removed_node);
             
             // printf("DataManagerEnd\n");
             return ret;
@@ -255,15 +241,13 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
 
 
     // if there is no set reader set to this thread and return data
-    if(!removed_node->readBy) {  //heap-use-after-free error bij fsanitize omdat node al verwijderd is door andere thread terwijl deze wacht op de lock
+    if(!removed_node->readBy) { 
         sensor_data_t data = removed_node->data; // om data races te voorkomen moeten we eerst de data kopieren naar een lokale variabele aangezien na het releasen van de lock (voor return) de data mogelijks al gefreed is door een andere thread
         removed_node->readBy = pthread_self();
         ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);    //unlocken voor return!
         return data;
     }
-    /*  -> lock loslaten om meteen weer te nemen -> niet nodig (fixed bepaalde dataraces zoals in afbeelding dataRaceDatamgrStoragemgr.png)
-    // if the node is already read by another node delete the node and return data
-    */
+
     if(removed_node->readBy != pthread_self()) {
         assert(removed_node != NULL);
         
@@ -278,8 +262,7 @@ sensor_data_t sbuffer_remove_last(sbuffer_t* buffer) {
         // printf("Free in storageManager, buffer bevat nog %d nodes \n", buffer->nodes);
         // printf("Free in storageManager \n");
         ASSERT_ELSE_PERROR(pthread_rwlock_unlock(&buffer->rwlock) == 0);
-        free(removed_node);     //probleem: ene thread vb storageManager voert dit uit terwijl dataManager nog leest op lijn 204 (return removed_node->data) en/of lijn 252 (return sbuffer_remove_last(buffer)) (ook zo bij free op lijn 250) -> datarace
-        
+        free(removed_node);             
         return ret;
     }
     sbuffer_node_t* previous_node = removed_node;
