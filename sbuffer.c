@@ -71,6 +71,13 @@ sbuffer_t* sbuffer_create() {
     return buffer;
 }
 
+void sbuffer_lock(sbuffer_t* buffer) {
+    //functie blijft staan omdat die anders error geeft bij compilen (ookal zijn alle calls naar deze functie die we gevonden hebben weg)
+}
+void sbuffer_unlock(sbuffer_t* buffer) {
+    //functie blijft staan omdat die anders error geeft bij compilen
+}
+
 void sleep_readers(sbuffer_t* buffer) {
     if(pthread_self() == buffer->dataManager) {
         ASSERT_ELSE_PERROR(pthread_mutex_lock(&buffer->dataManagerMutex) == 0);
